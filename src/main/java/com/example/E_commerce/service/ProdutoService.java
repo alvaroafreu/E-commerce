@@ -58,4 +58,21 @@ public class ProdutoService {
             System.out.println("O produto com o id: " + id + " Não foi encontrado!");
         }
     }
+    public List<Produto> buscaPorNome(String nome) {
+        List<Produto> resultados = new ArrayList<>();
+
+        if (nome == null || nome.trim().isEmpty()) {
+            return new ArrayList<>(produtos);
+        }
+
+        String termoBusca = nome.toLowerCase().trim();
+
+        for (Produto p : produtos) {
+            if (p.getNome() != null && p.getNome().toLowerCase().contains(termoBusca)) {
+                resultados.add(p);
+            }
+        }
+
+        return resultados;
+    }
 }
