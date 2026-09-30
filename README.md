@@ -11,11 +11,11 @@ Estou usando esse projeto para treinar e evoluir aos poucos, adicionando novas f
 - Login com diferenciação entre Administrador e Cliente
 - Administrador consegue cadastrar e remover produtos
 - Administrador consegue gerenciar contas de usuários
-- Produtos cadastrados aparecem na tela inicial
+- Produtos cadastrados aparecem na tela inicial 
+- Adicionar ao carrinho
 
 ## 🔧 Em desenvolvimento
 
-- Carrinho de compras (estrutura criada, sem lógica ainda)
 - Persistência em banco de dados (hoje os dados ficam em memória, via ArrayList, e se perdem ao reiniciar)
 
 ## 🛠️ Tecnologias
