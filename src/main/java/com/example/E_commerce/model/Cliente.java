@@ -5,6 +5,7 @@ import java.util.List;
 public class Cliente extends Usuario {
     private String endereco;
     private List<Produto> historicosCompras;
+
     public Cliente(){
         this.tipo = "CLIENTE";
     }

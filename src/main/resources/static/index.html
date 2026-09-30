@@ -20,11 +20,11 @@
         </div>
         <div class="header-actions">
             <button class="action-icon"><i class="fa-regular fa-heart"></i></button>
-            <button class="action-icon">
+            <button class="action-icon" onclick="abrirCarrinhoModal()" title="Carrinho">
                 <i class="fa-solid fa-cart-shopping"></i>
                 <span class="badge" id="cartCount">0</span>
             </button>
-            <button class="action-icon" onclick="clicarPerfil()" title="Perfil"><i class="fa-regular fa-user"></i></button>
+            <button class="action-icon" onclick="clicarPerfil()" title="Perfil"><i class="fa-regular fa-user"></i><span class="perfil-nome" id="perfilNome"></span></button>
         </div>
     </div>
     <nav class="nav-categories" id="navCategoriesBar">
@@ -83,6 +83,43 @@
     </div>
 </div>
 
+<!-- Modal do Carrinho -->
+<div class="modal-overlay" id="cartModal">
+    <div class="modal-box cart-box">
+        <div class="cart-head">
+            <h2><i class="fa-solid fa-cart-shopping"></i> Seu Carrinho</h2>
+            <button class="cart-close" onclick="fecharCarrinhoModal()" aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="cart-body">
+            <div id="cartItemsContainer" class="cart-items"></div>
+            <aside class="cart-summary">
+                <h3>Resumo do pedido</h3>
+                <div class="sum-row"><span id="cartQtdLabel">Produtos (0)</span><span id="cartSubtotal">R$ 0,00</span></div>
+                <div class="sum-row sum-total"><span>Total</span><span id="cartTotal">R$ 0,00</span></div>
+                <button class="btn-submit" onclick="finalizarCompra()">Finalizar Compra</button>
+                <button type="button" class="btn-link" onclick="fecharCarrinhoModal()">Continuar Comprando</button>
+            </aside>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Quantidade -->
+<div class="modal-overlay" id="qtyModal">
+    <div class="modal-box qty-box">
+        <h2 style="font-size: 1.25rem;">Quantas unidades?</h2>
+        <div class="qty-product"><div id="qtyImg"></div><div><div id="qtyNome" style="font-weight: 600; line-height: 1.3;"></div><div id="qtyPreco" style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem;"></div></div></div>
+        <div class="qty-stepper">
+            <button type="button" onclick="ajustarQtd(-1)" aria-label="Diminuir">−</button>
+            <input type="number" id="qtyInput" class="form-control" min="1" value="1" oninput="ajustarQtd(0)">
+            <button type="button" onclick="ajustarQtd(1)" aria-label="Aumentar">+</button>
+        </div>
+        <div class="qty-hint" id="qtyHint"></div>
+        <div class="sum-row sum-total"><span>Subtotal</span><span id="qtySubtotal"></span></div>
+        <button class="btn-submit" id="qtyConfirmar" onclick="confirmarAdicao()">Adicionar ao carrinho</button>
+        <button type="button" class="btn-link" onclick="fecharQtd()">Cancelar</button>
+    </div>
+</div>
+
 <!-- Main Container -->
 <div class="main-container" id="produtos-section">
     <div id="appContainer"></div>
@@ -105,10 +142,12 @@
             <div class="detail-stock" id="detailEstoque"><i class="fa-solid fa-circle-check"></i> <span></span></div>
             <div class="detail-desc-title">Descrição do Produto</div>
             <div class="detail-desc" id="detailDescricao"></div>
-            <button class="btn-buy-large">Adicionar ao Carrinho</button>
+            <button class="btn-buy-large" id="btnDetailBuy">Adicionar ao Carrinho</button>
         </div>
     </div>
 </div>
+
+<footer class="site-footer">© 2026 Nexus Hardware · Todos os direitos reservados</footer>
 
 <script src="script.js"></script>
 </body>

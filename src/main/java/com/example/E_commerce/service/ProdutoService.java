@@ -3,8 +3,10 @@ package com.example.E_commerce.service;
 import com.example.E_commerce.model.Produto;
 import org.springframework.stereotype.Service;
 
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 @Service
 public class ProdutoService {
@@ -58,6 +60,13 @@ public class ProdutoService {
             System.out.println("O produto com o id: " + id + " Não foi encontrado!");
         }
     }
+    private String removerAcentos(String texto) {
+        if (texto == null) return "";
+        String textoNormalizado = Normalizer.normalize(texto, Normalizer.Form.NFD);
+        Pattern pattern = Pattern.compile("\\p{InCombiningDiacriticalMarks}+");
+        return pattern.matcher(textoNormalizado).replaceAll("").toLowerCase().trim();
+    }
+
     public List<Produto> buscaPorNome(String nome) {
         List<Produto> resultados = new ArrayList<>();
 
@@ -65,11 +74,17 @@ public class ProdutoService {
             return new ArrayList<>(produtos);
         }
 
-        String termoBusca = nome.toLowerCase().trim();
+        // Remove os acentos e espaços do termo digitado pelo usuário
+        String termoBusca = removerAcentos(nome);
 
         for (Produto p : produtos) {
-            if (p.getNome() != null && p.getNome().toLowerCase().contains(termoBusca)) {
-                resultados.add(p);
+            if (p.getNome() != null) {
+                // Remove os acentos do nome do produto antes de comparar
+                String nomeProdutoLimpo = removerAcentos(p.getNome());
+
+                if (nomeProdutoLimpo.contains(termoBusca)) {
+                    resultados.add(p);
+                }
             }
         }
 

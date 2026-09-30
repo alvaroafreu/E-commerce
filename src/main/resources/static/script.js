@@ -1,5 +1,6 @@
 const API_URL = 'http://localhost:8081/api/produtos';
 const API_USUARIOS = 'http://localhost:8081/api/usuarios';
+const API_CARRINHO = 'http://localhost:8081/api/carrinho';
 
 let produtosGlobais = [];
 let usuariosGlobais = [];
@@ -9,9 +10,11 @@ let idUsuarioEmEdicao = null;
 let modoAdm = false;
 let abaAdminAtual = 'produtos';
 let subAbaUsuario = 'clientes'; // 'clientes' ou 'admins'
+let ordenacaoAtual = 'relevancia';
 
 window.onload = () => {
     carregarProdutos();
+    atualizarContadorCarrinho();
 
     const searchInput = document.getElementById('searchInput');
     const searchIcon = document.getElementById('searchIcon');
@@ -53,6 +56,7 @@ window.onload = () => {
 };
 
 async function carregarProdutos() {
+    if (!modoAdm) mostrarSkeleton();
     try {
         const response = await fetch(API_URL);
         if (!response.ok) throw new Error('Falha ao buscar produtos');
@@ -87,6 +91,8 @@ function atualizarBarraCategorias() {
     if (admBtnExistente) admBtnExistente.remove();
 
     const usuarioLogado = JSON.parse(localStorage.getItem('usuarioLogado'));
+    const pn = document.getElementById('perfilNome');
+    if (pn) pn.textContent = usuarioLogado ? (usuarioLogado.nome || '').split(' ')[0] : '';
 
     if (usuarioLogado && usuarioLogado.tipo === 'ADMIN') {
         const btnAdm = document.createElement('button');
@@ -108,7 +114,8 @@ function clicarPerfil() {
             abaAdminAtual = 'produtos';
             atualizarBarraCategorias();
             renderizarInterface();
-            alert('Você saiu da sua conta.');
+            notificar('Você saiu da sua conta.');
+            atualizarContadorCarrinho();
         }
     } else {
         abrirModalAuth();
@@ -157,17 +164,19 @@ async function realizarLogin(e) {
 
         if (response.ok) {
             const usuario = await response.json();
-            localStorage.setItem('usuarioLogado', JSON.stringify(usuario));
+            const { senha: _omit, ...usuarioSeguro } = usuario;
+            localStorage.setItem('usuarioLogado', JSON.stringify(usuarioSeguro));
             fecharModalAuth();
-            alert(`Bem-vindo de volta, ${usuario.nome}!`);
+            notificar(`Bem-vindo de volta, ${usuario.nome}!`);
+            atualizarContadorCarrinho();
             atualizarBarraCategorias();
             renderizarInterface();
         } else {
-            alert('E-mail ou senha incorretos!');
+            notificar('E-mail ou senha incorretos!');
         }
     } catch (error) {
         console.error('Erro no login:', error);
-        alert('Erro de comunicação com o backend.');
+        notificar('Erro de comunicação com o backend.');
     }
 }
 
@@ -177,6 +186,7 @@ async function realizarCadastro(e) {
         nome: document.getElementById('cadNome').value,
         email: document.getElementById('cadEmail').value,
         endereco: document.getElementById('cadEndereco').value,
+        tipo: 'CLIENTE',
         senha: document.getElementById('cadSenha').value
     };
 
@@ -188,10 +198,10 @@ async function realizarCadastro(e) {
         });
 
         if (response.ok) {
-            alert('Conta criada com sucesso! Faça login para continuar.');
+            notificar('Conta criada com sucesso! Faça login para continuar.');
             trocarAbaModal('login');
         } else {
-            alert('Erro ao criar conta.');
+            notificar('Erro ao criar conta.');
         }
     } catch (error) {
         console.error('Erro no cadastro:', error);
@@ -207,7 +217,7 @@ async function tratarCliqueCategoria(e, elemento) {
     if (cat === 'ADM') {
         const usuarioLogado = JSON.parse(localStorage.getItem('usuarioLogado'));
         if (!usuarioLogado || usuarioLogado.tipo !== 'ADMIN') {
-            alert('Acesso restrito!');
+            notificar('Acesso restrito!');
             abrirModalAuth();
             return;
         }
@@ -274,6 +284,15 @@ function abrirDetalhesProduto(produto) {
     document.getElementById('detailDescricao').textContent = produto.descricao || 'Sem descrição disponível.';
     document.getElementById('detailEstoque').querySelector('span').textContent = `${produto.estoque} unidades disponíveis em estoque`;
 
+    // Vincular botão de compra nos detalhes
+    const btnBuy = document.getElementById('btnDetailBuy');
+    const semEstoque = !(produto.estoque > 0);
+    btnBuy.onclick = () => adicionarAoCarrinho(produto.id);
+    btnBuy.disabled = semEstoque;
+    btnBuy.textContent = semEstoque ? 'Produto esgotado' : 'Adicionar ao Carrinho';
+    document.getElementById('detailEstoque').style.color = semEstoque ? 'var(--danger)' : produto.estoque <= 5 ? 'var(--warning)' : 'var(--success)';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
     const mainImageContainer = document.getElementById('detailMainImage');
     const thumbnailsContainer = document.querySelector('.detail-thumbnails');
     thumbnailsContainer.innerHTML = '';
@@ -289,13 +308,13 @@ function abrirDetalhesProduto(produto) {
     }
 
     if (imagens.length > 0) {
-        mainImageContainer.innerHTML = `<img src="${imagens[0]}" alt="${produto.nome}" style="width: 100%; height: 100%; object-fit: contain;">`;
+        mainImageContainer.innerHTML = `<img src="${escapeHtml(imagens[0])}" alt="${escapeHtml(produto.nome)}" style="width: 100%; height: 100%; object-fit: contain;">`;
         imagens.forEach((imgUrl) => {
             const thumb = document.createElement('div');
             thumb.className = 'detail-thumb';
-            thumb.innerHTML = `<img src="${imgUrl}" alt="Thumb" style="width: 100%; height: 100%; object-fit: cover;">`;
+            thumb.innerHTML = `<img src="${escapeHtml(imgUrl)}" alt="Thumb" style="width: 100%; height: 100%; object-fit: cover;">`;
             thumb.onclick = () => {
-                mainImageContainer.innerHTML = `<img src="${imgUrl}" alt="${produto.nome}" style="width: 100%; height: 100%; object-fit: contain;">`;
+                mainImageContainer.innerHTML = `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(produto.nome)}" style="width: 100%; height: 100%; object-fit: contain;">`;
             };
             thumbnailsContainer.appendChild(thumb);
         });
@@ -308,14 +327,14 @@ async function salvarProdutoForm(e) {
     e.preventDefault();
 
     let precoStr = document.getElementById('preco').value.trim();
-    precoStr = precoStr.replace(/\./g, '').replace(',', '.');
+    if (precoStr.includes(',')) precoStr = precoStr.replace(/\./g, '').replace(',', '.');
     const preco = parseFloat(precoStr);
 
     const estoqueStr = document.getElementById('estoque').value.trim();
     const estoque = parseInt(estoqueStr, 10);
 
     if (isNaN(preco) || isNaN(estoque)) {
-        alert('Por favor, insira valores numéricos válidos para o preço e o estoque.');
+        notificar('Por favor, insira valores numéricos válidos para o preço e o estoque.');
         return;
     }
 
@@ -342,18 +361,18 @@ async function salvarProdutoForm(e) {
         });
 
         if (response.ok) {
-            alert(idProdutoEmEdicao ? 'Produto atualizado com sucesso!' : 'Produto cadastrado com sucesso!');
+            notificar(idProdutoEmEdicao ? 'Produto atualizado com sucesso!' : 'Produto cadastrado com sucesso!');
             idProdutoEmEdicao = null;
             document.getElementById('produtoForm').reset();
             carregarProdutos();
         } else {
             const erroDetalhe = await response.text();
             console.error('Erro do servidor:', erroDetalhe);
-            alert(`Erro ao salvar produto: ${erroDetalhe || response.statusText}`);
+            notificar(`Erro ao salvar produto: ${erroDetalhe || response.statusText}`);
         }
     } catch (error) {
         console.error('Erro de conexão:', error);
-        alert('Erro de conexão com o servidor. Verifique se o back-end está rodando.');
+        notificar('Erro de conexão com o servidor. Verifique se o back-end está rodando.');
     }
 }
 
@@ -364,7 +383,7 @@ async function deletarProduto(id) {
         if (response.ok) {
             carregarProdutos();
         } else {
-            alert('Erro ao deletar produto.');
+            notificar('Erro ao deletar produto.');
         }
     } catch (error) {
         console.error('Erro:', error);
@@ -402,6 +421,8 @@ function renderizarInterface() {
             p.categoria && p.categoria.trim().toLowerCase() === categoriaAtual.trim().toLowerCase()
         );
     }
+
+    if (!modoAdm) filtrados = ordenarProdutos(filtrados);
 
     if (modoAdm) {
         container.className = 'admin-layout';
@@ -486,14 +507,14 @@ function renderizarInterface() {
                 card.className = `product-card admin-card ${produto.id === idProdutoEmEdicao ? 'editando' : ''}`;
                 card.innerHTML = `
                     <div style="width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                        <span style="font-size: 0.75rem; color: var(--accent); font-weight: 600; background: rgba(139, 92, 246, 0.1); padding: 2px 8px; border-radius: 4px;">${produto.categoria || 'Geral'} (ID: ${produto.id})</span>
+                        <span style="font-size: 0.75rem; color: var(--accent); font-weight: 600; background: rgba(139, 92, 246, 0.1); padding: 2px 8px; border-radius: 4px;">${escapeHtml(produto.categoria || 'Geral')} (ID: ${produto.id})</span>
                         <div style="display: flex; gap: 0.75rem; align-items: center;">
                             <button class="action-icon" style="font-size: 0.95rem; color: var(--primary);" onclick="prepararEdicao(${produto.id})" title="Editar"><i class="fa-solid fa-pen-to-square"></i></button>
                             <button class="btn-delete" onclick="deletarProduto(${produto.id})" title="Excluir"><i class="fa-solid fa-trash"></i></button>
                         </div>
                     </div>
-                    <div class="product-name" style="margin-bottom: 0.4rem; font-size: 1rem;">${produto.nome}</div>
-                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${produto.descricao || 'Sem descrição'}</p>
+                    <div class="product-name" style="margin-bottom: 0.4rem; font-size: 1rem;">${escapeHtml(produto.nome)}</div>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${escapeHtml(produto.descricao || 'Sem descrição')}</p>
                     <div style="width: 100%; display: flex; justify-content: space-between; align-items: center; margin-top: auto; border-top: 1px solid var(--border); padding-top: 0.75rem;">
                         <span style="font-size: 0.85rem; color: var(--success);"><i class="fa-solid fa-box"></i> ${produto.estoque} un.</span>
                         <span class="product-price" style="font-size: 1.1rem;">${precoFormatado}</span>
@@ -583,7 +604,16 @@ function renderizarInterface() {
         container.className = 'store-layout';
         const tituloExibicao = (categoriaAtual === 'Produtos') ? 'Todos os Produtos' : categoriaAtual;
         container.innerHTML = `
-            <div class="section-header"><h2 class="section-title" id="tituloSecao">${tituloExibicao}</h2></div>
+            ${categoriaAtual === 'Produtos' ? `<section class="hero"><div><h1>Eleve seu setup</h1><p>Placas de vídeo, processadores, memórias e periféricos em um só lugar.</p></div><i class="fa-solid fa-microchip"></i></section>` : ''}
+            <div class="section-header">
+                <div><h2 class="section-title" id="tituloSecao">${tituloExibicao}</h2><span class="result-count">${filtrados.length} produto(s)</span></div>
+                <select class="form-control sort-select" onchange="mudarOrdenacao(this.value)" aria-label="Ordenar produtos">
+                    <option value="relevancia" ${ordenacaoAtual === 'relevancia' ? 'selected' : ''}>Ordenar: padrão</option>
+                    <option value="menor" ${ordenacaoAtual === 'menor' ? 'selected' : ''}>Menor preço</option>
+                    <option value="maior" ${ordenacaoAtual === 'maior' ? 'selected' : ''}>Maior preço</option>
+                    <option value="nome" ${ordenacaoAtual === 'nome' ? 'selected' : ''}>Nome (A-Z)</option>
+                </select>
+            </div>
             <div class="products-grid" id="produtosGrid"></div>
         `;
 
@@ -609,15 +639,18 @@ function renderizarInterface() {
                 }
             }
 
+            const esgotado = !(produto.estoque > 0);
+            const poucas = produto.estoque > 0 && produto.estoque <= 5;
+            const selo = esgotado ? '<span class="tag tag-out">Esgotado</span>' : poucas ? '<span class="tag tag-low">Últimas unidades</span>' : '';
             const imagemHtml = primeiraImagem
-                ? `<img src="${primeiraImagem}" alt="${produto.nome}" style="width: 100%; height: 185px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 1rem;">`
+                ? `<img src="${escapeHtml(primeiraImagem)}" alt="${escapeHtml(produto.nome)}" style="width: 100%; height: 185px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 1rem;">`
                 : `<div style="width: 100%; height: 185px; background: var(--bg-color); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); margin-bottom: 1rem; border: 1px solid var(--border);"><i class="fa-solid fa-image" style="font-size: 2.2rem;"></i></div>`;
 
             card.innerHTML = `
-                <div style="width: 100%;">${imagemHtml}<div class="product-name" style="margin-bottom: 1rem;">${produto.nome}</div></div>
+                <div style="width: 100%;"><div class="card-media">${imagemHtml}${selo}</div><div class="product-name" style="margin-bottom: 1rem;">${escapeHtml(produto.nome)}</div></div>
                 <div style="width: 100%; display: flex; flex-direction: column; gap: 1rem;">
                     <div class="product-price">${precoFormatado}</div>
-                    <button type="button" onclick="event.stopPropagation()" style="background: var(--warning); color: white; border: none; padding: 0.75rem; border-radius: 6px; font-weight: 600; cursor: pointer; width: 100%;">Comprar</button>
+                    <button type="button" class="btn-comprar" ${esgotado ? 'disabled' : ''} onclick="event.stopPropagation(); adicionarAoCarrinho(${produto.id})">${esgotado ? 'Esgotado' : '<i class="fa-solid fa-cart-plus"></i> Comprar'}</button>
                 </div>
             `;
             grid.appendChild(card);
@@ -664,9 +697,9 @@ function preencherTabelaUsuariosFiltrada(lista) {
         const infoExtra = u.endereco || u.funcao || 'N/A';
         tr.innerHTML = `
             <td>${u.id}</td>
-            <td style="font-weight: 600;">${u.nome}</td>
-            <td>${u.email}</td>
-            <td style="color: var(--text-muted);">${infoExtra}</td>
+            <td style="font-weight: 600;">${escapeHtml(u.nome)}</td>
+            <td>${escapeHtml(u.email)}</td>
+            <td style="color: var(--text-muted);">${escapeHtml(infoExtra)}</td>
             <td style="text-align: right;">
                 <div style="display: flex; gap: 0.75rem; justify-content: flex-end; align-items: center;">
                     <button class="action-icon" style="font-size: 0.95rem; color: var(--primary);" onclick="prepararEdicaoUsuario(${u.id})" title="Editar Usuário"><i class="fa-solid fa-pen-to-square"></i></button>
@@ -735,23 +768,23 @@ async function salvarUsuarioCadEdit(e) {
         const url = `${API_USUARIOS}/${idUsuarioEmEdicao}`;
         try {
             const response = await fetch(url, {
-                method: 'PUT',
+                method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(campos)
             });
             if (response.ok) {
-                alert('Usuário atualizado com sucesso!');
+                notificar('Usuário atualizado com sucesso!');
                 idUsuarioEmEdicao = null;
                 carregarUsuarios();
             } else {
-                alert('Erro ao atualizar usuário.');
+                notificar('Erro ao atualizar usuário.');
             }
         } catch (error) {
             console.error('Erro:', error);
         }
     } else {
         const endpoint = ehAdmin ? `${API_USUARIOS}/admin` : `${API_USUARIOS}/cliente`;
-        const campos = { nome, email, senha };
+        const campos = { nome, email, senha, tipo: ehAdmin ? 'ADMIN' : 'CLIENTE' };
         if (!ehAdmin) campos.endereco = endereco;
         if (ehAdmin) campos.funcao = funcao;
 
@@ -762,11 +795,11 @@ async function salvarUsuarioCadEdit(e) {
                 body: JSON.stringify(campos)
             });
             if (response.ok) {
-                alert('Usuário cadastrado com sucesso!');
+                notificar('Usuário cadastrado com sucesso!');
                 document.getElementById('usuarioForm').reset();
                 carregarUsuarios();
             } else {
-                alert('Erro ao cadastrar usuário.');
+                notificar('Erro ao cadastrar usuário.');
             }
         } catch (error) {
             console.error('Erro:', error);
@@ -781,9 +814,234 @@ async function deletarUsuario(id) {
         if (response.ok) {
             carregarUsuarios();
         } else {
-            alert('Erro ao deletar usuário.');
+            notificar('Erro ao deletar usuário.');
         }
     } catch (error) {
         console.error('Erro:', error);
     }
 }
+
+// ===== Carrinho =====
+function getUsuarioLogado() {
+    try { return JSON.parse(localStorage.getItem('usuarioLogado')); } catch { return null; }
+}
+
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+const formatarBRL = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+// Backend devolve List<Produto> (repetidos se adicionado mais de uma vez): agrupa por id para mostrar quantidade
+async function buscarItensCarrinho() {
+    const usuario = getUsuarioLogado();
+    if (!usuario) return [];
+    const response = await fetch(`${API_CARRINHO}/produtos/${usuario.id}`);
+    if (!response.ok) throw new Error('Erro ao buscar carrinho');
+    const produtos = await response.json();
+    const mapa = new Map();
+    produtos.forEach(p => {
+        const item = mapa.get(p.id);
+        if (item) item.quantidade++;
+        else mapa.set(p.id, { produto: p, quantidade: 1 });
+    });
+    return [...mapa.values()];
+}
+
+let qtdProduto = null, qtdMax = 1, qtdAtual = 1;
+
+// Clicar em "Comprar" abre a pergunta de quantidade (não adiciona direto)
+async function adicionarAoCarrinho(idProduto) {
+    if (!getUsuarioLogado()) {
+        notificar('Faça login para adicionar produtos ao carrinho.');
+        abrirModalAuth();
+        return;
+    }
+    const produto = produtosGlobais.find(p => p.id === idProduto);
+    if (!produto) return;
+
+    let noCarrinho = 0;
+    try {
+        const item = (await buscarItensCarrinho()).find(i => i.produto.id === idProduto);
+        noCarrinho = item ? item.quantidade : 0;
+    } catch (e) { console.error(e); }
+
+    const max = (produto.estoque || 0) - noCarrinho;
+    if (max <= 0) {
+        notificar(noCarrinho ? 'Você já tem todo o estoque disponível deste produto no carrinho.' : 'Produto sem estoque.', 'erro');
+        return;
+    }
+
+    qtdProduto = produto; qtdMax = max; qtdAtual = 1;
+    document.getElementById('qtyImg').innerHTML = miniatura(produto);
+    document.getElementById('qtyNome').textContent = produto.nome;
+    document.getElementById('qtyPreco').textContent = `${formatarBRL(produto.preco)} cada`;
+    document.getElementById('qtyInput').value = 1;
+    document.getElementById('qtyModal').classList.add('active');
+    ajustarQtd(0);
+}
+
+function ajustarQtd(delta) {
+    if (!qtdProduto) return;
+    const input = document.getElementById('qtyInput');
+    let v = parseInt(input.value, 10);
+    if (isNaN(v)) v = 1;
+    v = Math.min(Math.max(v + delta, 1), qtdMax);
+    input.value = v; qtdAtual = v;
+    document.getElementById('qtySubtotal').textContent = formatarBRL(v * qtdProduto.preco);
+    document.getElementById('qtyHint').textContent = `Máximo disponível para você: ${qtdMax}`;
+}
+
+function fecharQtd() { document.getElementById('qtyModal').classList.remove('active'); }
+
+async function confirmarAdicao() {
+    const usuario = getUsuarioLogado();
+    if (!usuario || !qtdProduto) return;
+    const btn = document.getElementById('qtyConfirmar');
+    btn.disabled = true;
+    try {
+        const response = await fetch(`${API_CARRINHO}/adicionar/${usuario.id}/${qtdProduto.id}?quantidade=${qtdAtual}`, { method: 'POST' });
+        if (response.ok) {
+            fecharQtd();
+            notificar(`${qtdAtual}x ${qtdProduto.nome} adicionado(s) ao carrinho!`);
+            atualizarContadorCarrinho();
+        } else {
+            notificar(`Erro ao adicionar o produto (código ${response.status}).`);
+        }
+    } catch (error) {
+        console.error('Erro na requisição:', error);
+        notificar('Não foi possível conectar ao servidor do carrinho.');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function removerDoCarrinho(idProduto) {
+    const usuario = getUsuarioLogado();
+    if (!usuario) return;
+    try {
+        const response = await fetch(`${API_CARRINHO}/${usuario.id}/${idProduto}`, { method: 'DELETE' });
+        if (response.ok) {
+            notificar('Produto removido do carrinho.', 'info');
+            atualizarContadorCarrinho();
+            abrirCarrinhoModal();
+        } else {
+            notificar('Erro ao remover o produto.');
+        }
+    } catch (error) {
+        notificar('Não foi possível conectar ao servidor do carrinho.');
+    }
+}
+
+async function atualizarContadorCarrinho() {
+    const badge = document.getElementById('cartCount');
+    if (!badge) return;
+    try {
+        const itens = await buscarItensCarrinho();
+        badge.textContent = itens.reduce((acc, i) => acc + i.quantidade, 0);
+        badge.classList.remove('bump'); void badge.offsetWidth; badge.classList.add('bump');
+    } catch (error) {
+        console.error('Erro ao atualizar contador do carrinho:', error);
+        badge.textContent = 0;
+    }
+}
+
+async function abrirCarrinhoModal() {
+    if (!getUsuarioLogado()) {
+        notificar('Faça login para ver o seu carrinho.');
+        abrirModalAuth();
+        return;
+    }
+    document.getElementById('cartModal').classList.add('active');
+    const container = document.getElementById('cartItemsContainer');
+    const setResumo = (qtd, total) => {
+        document.getElementById('cartQtdLabel').textContent = `Produtos (${qtd})`;
+        document.getElementById('cartSubtotal').textContent = formatarBRL(total);
+        document.getElementById('cartTotal').textContent = formatarBRL(total);
+    };
+    container.innerHTML = '<p class="cart-msg">Carregando carrinho...</p>';
+
+    try {
+        const itens = await buscarItensCarrinho();
+        if (itens.length === 0) {
+            container.innerHTML = '<div class="cart-vazio"><i class="fa-solid fa-cart-shopping"></i><p>Seu carrinho está vazio</p><button class="btn-submit" onclick="fecharCarrinhoModal()">Ver produtos</button></div>';
+            setResumo(0, 0);
+            return;
+        }
+        let total = 0, totalQtd = 0;
+        container.innerHTML = '';
+        itens.forEach(({ produto, quantidade }) => {
+            const subtotal = (produto.preco || 0) * quantidade;
+            total += subtotal; totalQtd += quantidade;
+            const div = document.createElement('div');
+            div.className = 'cart-item';
+            div.innerHTML = `
+                ${miniatura(produto)}
+                <div class="cart-item-info">
+                    <div class="cart-item-nome">${escapeHtml(produto.nome)}</div>
+                    <div class="cart-item-unit">${formatarBRL(produto.preco)} cada</div>
+                    <button type="button" class="btn-link-danger" onclick="removerDoCarrinho(${produto.id})"><i class="fa-solid fa-trash"></i> Remover</button>
+                </div>
+                <div class="cart-item-right">
+                    <span class="cart-item-qtd">Qtd: ${quantidade}</span>
+                    <strong>${formatarBRL(subtotal)}</strong>
+                </div>`;
+            container.appendChild(div);
+        });
+        setResumo(totalQtd, total);
+    } catch (error) {
+        console.error(error);
+        container.innerHTML = '<p class="cart-msg" style="color: var(--danger);">Erro ao carregar itens do carrinho.</p>';
+    }
+}
+
+function fecharCarrinhoModal() {
+    document.getElementById('cartModal').classList.remove('active');
+}
+
+function finalizarCompra() {
+    notificar('Funcionalidade de finalização de compra em desenvolvimento.');
+    fecharCarrinhoModal();
+}
+
+// ===== Melhorias de experiência =====
+function notificar(msg, tipo) {
+    if (!tipo) tipo = /erro|incorret|restrito|não foi|falha|sem estoque/i.test(msg) ? 'erro'
+        : /sucesso|bem-vindo|adicionado|saiu/i.test(msg) ? 'ok' : 'info';
+    let wrap = document.getElementById('toastWrap');
+    if (!wrap) { wrap = document.createElement('div'); wrap.id = 'toastWrap'; wrap.className = 'toast-wrap'; document.body.appendChild(wrap); }
+    const icone = { ok: 'fa-circle-check', erro: 'fa-circle-exclamation', info: 'fa-circle-info' }[tipo];
+    const t = document.createElement('div');
+    t.className = `toast toast-${tipo}`;
+    t.innerHTML = `<i class="fa-solid ${icone}"></i><span>${escapeHtml(msg)}</span>`;
+    wrap.appendChild(t);
+    setTimeout(() => { t.classList.add('saindo'); setTimeout(() => t.remove(), 300); }, 3200);
+}
+
+function mostrarSkeleton() {
+    const c = document.getElementById('appContainer');
+    c.className = 'store-layout';
+    c.innerHTML = '<div class="products-grid">' + '<div class="skeleton-card"></div>'.repeat(8) + '</div>';
+}
+
+function ordenarProdutos(lista) {
+    const l = [...lista];
+    if (ordenacaoAtual === 'menor') l.sort((a, b) => a.preco - b.preco);
+    else if (ordenacaoAtual === 'maior') l.sort((a, b) => b.preco - a.preco);
+    else if (ordenacaoAtual === 'nome') l.sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+    return l;
+}
+
+function mudarOrdenacao(v) { ordenacaoAtual = v; renderizarInterface(); }
+
+function miniatura(p) {
+    const img = Array.isArray(p.imagensUrl) ? p.imagensUrl[0] : null;
+    return img
+        ? `<img src="${escapeHtml(img)}" alt="" class="cart-thumb">`
+        : '<div class="cart-thumb cart-thumb-vazia"><i class="fa-solid fa-image"></i></div>';
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { fecharModalAuth(); fecharCarrinhoModal(); } });
+document.querySelectorAll('.modal-overlay').forEach(m => m.addEventListener('click', e => { if (e.target === m) m.classList.remove('active'); }));
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') fecharQtd(); });
